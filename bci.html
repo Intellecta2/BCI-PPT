@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RaSoR | BCI Visionary Edition</title>
+    
+    <!-- Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Robust Icon Loader -->
+    <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/TextPlugin.min.js"></script>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700;900&family=Cormorant+Garamond:ital,wght@0,400;1,400;1,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-deep: #020617;
+            --glass-surface: rgba(30, 41, 59, 0.6);
+            --glass-border: rgba(148, 163, 184, 0.2);
+            --accent-cyan: #22d3ee;
+            --accent-indigo: #818cf8;
+            --accent-rose: #fb7185;
+        }
+
+        html { scroll-behavior: smooth; }
+        body { 
+            background-color: var(--bg-deep); 
+            color: #f8fafc; 
+            font-family: 'Outfit', sans-serif; 
+            overflow-x: hidden;
+        }
+
+        h1, h2, .font-serif { font-family: 'Cormorant Garamond', serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* --- BACKGROUND FX --- */
+        #neural-canvas {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: -2;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
+        #eeg-canvas {
+            position: fixed;
+            bottom: 0; left: 0; width: 100%; height: 80px;
+            z-index: 40;
+            opacity: 0.5;
+            pointer-events: none;
+            mix-blend-mode: screen;
+        }
+
+        .gradient-orb {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(120px);
+            z-index: -3;
+            opacity: 0.25;
+            animation: pulse 12s infinite alternate ease-in-out;
+        }
+        .orb-1 { top: -10%; right: -10%; width: 700px; height: 700px; background: var(--accent-indigo); }
+        .orb-2 { bottom: -10%; left: -10%; width: 600px; height: 600px; background: var(--accent-cyan); animation-delay: -5s; }
+
+        @keyframes pulse { 0% { opacity: 0.2; transform: scale(1); } 100% { opacity: 0.4; transform: scale(1.1); } }
+
+        /* --- UI COMPONENTS --- */
+        .glass-panel {
+            background: var(--glass-surface);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+            transform-style: preserve-3d;
+            perspective: 1000px;
+            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5);
+        }
+        .glass-panel:hover {
+            border-color: rgba(255,255,255,0.4);
+            box-shadow: 0 20px 60px -10px rgba(81, 236, 252, 0.15);
+        }
+        
+        .pill-badge {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 0.5rem 1.25rem;
+            border-radius: 99px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #94a3b8;
+        }
+
+        .text-gradient {
+            background: linear-gradient(135deg, #fff 20%, #a5b4fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .image-container {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            border-radius: 16px;
+            position: relative;
+        }
+        .image-container img {
+            width: 100%; height: 100%; object-fit: cover;
+            transition: transform 0.7s ease;
+        }
+        .glass-panel:hover .image-container img {
+            transform: scale(1.05);
+        }
+
+        /* --- LAYOUT --- */
+        section {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 2rem;
+            position: relative;
+        }
+
+        /* --- NAVIGATION --- */
+        .nav-dots {
+            position: fixed;
+            right: 24px; top: 50%; transform: translateY(-50%);
+            display: flex; flex-direction: column; gap: 12px; z-index: 50;
+        }
+        .dot {
+            width: 4px; height: 4px; background: rgba(255,255,255,0.2);
+            border-radius: 50%; transition: all 0.3s; cursor: pointer;
+        }
+        .dot.active {
+            width: 4px; height: 24px; background: var(--accent-cyan);
+            border-radius: 4px;
+            box-shadow: 0 0 10px var(--accent-cyan);
+        }
+
+        /* --- ANIMATIONS --- */
+        .reveal-up { opacity: 0; transform: translateY(40px); }
+        .reveal-scale { opacity: 0; transform: scale(0.9); }
+        
+        .chart-container { position: relative; height: 300px; width: 100%; }
+    </style>
+</head>
+<body>
+
+    <!-- FX LAYERS -->
+    <canvas id="neural-canvas"></canvas>
+    <canvas id="eeg-canvas"></canvas>
+    <div class="gradient-orb orb-1"></div>
+    <div class="gradient-orb orb-2"></div>
+
+    <!-- UI: NAV DOTS -->
+    <div class="nav-dots" id="navDots"></div>
+
+    <!-- UI: HEADER -->
+    <header class="fixed top-0 left-0 w-full p-6 z-50 flex justify-between items-center mix-blend-screen pointer-events-none">
+        <div class="flex items-center gap-3 pointer-events-auto">
+            <div class="w-10 h-10 bg-white/10 rounded-xl border border-white/20 flex items-center justify-center font-bold text-white backdrop-blur-md">R</div>
+            <div>
+                <div class="font-bold text-white text-sm tracking-wide">RaSoR <span class="text-cyan-400">Labs</span></div>
+                <div class="text-[10px] text-slate-400 font-mono tracking-widest">IIT MADRAS</div>
+            </div>
+        </div>
+        <div class="pill-badge backdrop-blur-md pointer-events-auto flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            Spotlight XI
+        </div>
+    </header>
+
+    <!-- SLIDE 1: TITLE -->
+    <section id="slide-1">
+        <div class="container max-w-5xl mx-auto text-center">
+            <div class="inline-flex items-center gap-2 text-cyan-400 font-mono text-xs mb-6 reveal-up">
+                SYSTEM ONLINE // AUDIO: OFF
+            </div>
+            <h1 class="text-7xl md:text-9xl font-bold mb-8 leading-none reveal-up">
+                The Neural<br><span class="font-serif italic text-gradient">Horizon.</span>
+            </h1>
+            <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-12 reveal-up delay-100">
+                Reinventing Digital Interaction. <br>From Assistive Tech to Human Augmentation.
+            </p>
+            <div class="flex justify-center reveal-up delay-200">
+                <div class="animate-bounce text-slate-500"><i data-lucide="arrow-down" class="w-6 h-6"></i></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 2: INTRO -->
+    <section id="slide-2">
+        <div class="container max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+            <div class="reveal-up">
+                <div class="pill-badge mb-6 text-indigo-300 border-indigo-500/30">Presenter</div>
+                <h2 class="text-5xl font-serif font-bold mb-6">Rohit Kumar</h2>
+                <p class="text-lg text-slate-300 leading-relaxed mb-8">
+                    Core R&D Team, RaSoR.<br>
+                    "I research the interface where biology meets silicon."
+                </p>
+                <div class="flex gap-4">
+                    <div class="p-4 bg-white/5 rounded-xl border border-white/10 text-center w-32 tilt-card">
+                        <div class="font-bold text-xl text-white">Focus</div>
+                        <div class="text-xs text-slate-500 uppercase">Neural Eng</div>
+                    </div>
+                    <div class="p-4 bg-white/5 rounded-xl border border-white/10 text-center w-32 tilt-card">
+                        <div class="font-bold text-xl text-white">Status</div>
+                        <div class="text-xs text-slate-500 uppercase">Research</div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-center reveal-scale delay-100">
+                <div class="relative w-64 h-64 glass-panel rounded-full flex items-center justify-center border-4 border-slate-700/50">
+                    <div class="w-full h-full rounded-full overflow-hidden opacity-80 hover:opacity-100 transition-opacity bg-slate-800 flex items-center justify-center">
+                        <span class="text-6xl font-serif text-white">R</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 3: THE HOOK -->
+    <section id="slide-3">
+        <div class="container max-w-3xl mx-auto text-center">
+            <div class="mb-8 flex justify-center reveal-up">
+                <div class="p-4 bg-rose-500/10 rounded-full border border-rose-500/20">
+                    <i data-lucide="lock" class="w-10 h-10 text-rose-400"></i>
+                </div>
+            </div>
+            <h2 class="text-5xl md:text-6xl font-bold mb-8 reveal-up">"I'm still here."</h2>
+            <p class="text-xl text-slate-300 leading-relaxed reveal-up delay-100">
+                Imagine waking up fully conscious, but completely locked in. <br>
+                Your brain is alive. Your body is not. <br>
+                How do you ask for water?
+            </p>
+        </div>
+    </section>
+
+    <!-- SLIDE 4: THE QUESTION -->
+    <section id="slide-4">
+        <div class="container max-w-4xl mx-auto text-center">
+            <h2 class="text-4xl md:text-7xl font-serif italic text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-cyan-300 reveal-scale leading-tight">
+                Can we let the brain speak<br>without the body?
+            </h2>
+        </div>
+    </section>
+
+    <!-- SLIDE 5: THE BOTTLENECK -->
+    <section id="slide-5">
+        <div class="container max-w-5xl mx-auto">
+            <div class="text-center mb-16 reveal-up">
+                <div class="pill-badge mb-4">The Problem</div>
+                <h2 class="text-4xl font-bold">The Intent Bottleneck</h2>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="glass-panel p-10 reveal-up tilt-card">
+                    <div class="flex justify-between items-center mb-6">
+                        <span class="text-cyan-400 font-bold tracking-widest text-sm">INPUT (SENSORY)</span>
+                        <i data-lucide="download" class="text-cyan-400 w-5 h-5"></i>
+                    </div>
+                    <div class="text-6xl font-bold mb-2 count-up" data-target="10">0</div>
+                    <div class="text-xl font-serif italic text-slate-400">Megabits / sec</div>
+                    <div class="w-full h-1 bg-slate-700 mt-8 rounded-full overflow-hidden">
+                        <div class="h-full bg-cyan-400 w-0 bar-anim" data-width="100%"></div>
+                    </div>
+                </div>
+                <div class="glass-panel p-10 border-rose-500/20 reveal-up delay-100 tilt-card">
+                    <div class="flex justify-between items-center mb-6">
+                        <span class="text-rose-400 font-bold tracking-widest text-sm">OUTPUT (MOTOR)</span>
+                        <i data-lucide="upload" class="text-rose-400 w-5 h-5"></i>
+                    </div>
+                    <div class="text-6xl font-bold mb-2 count-up" data-target="40">0</div>
+                    <div class="text-xl font-serif italic text-slate-400">Bits / sec</div>
+                    <div class="w-full h-1 bg-slate-700 mt-8 rounded-full overflow-hidden">
+                        <div class="h-full bg-rose-500 w-0 bar-anim" id="bottleneckBar" data-width="1%"></div>
+                    </div>
+                    <button onclick="runSim()" class="mt-6 text-xs text-rose-400 hover:text-rose-300 underline underline-offset-4 font-bold tracking-widest">RUN SPEED TEST</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 6: DEFINITION -->
+    <section id="slide-6">
+        <div class="container max-w-4xl mx-auto text-center">
+            <h2 class="text-5xl font-bold mb-12 reveal-up">Brain-Computer Interface</h2>
+            <div class="flex justify-center items-center gap-4 md:gap-12 reveal-up">
+                <div class="flex flex-col items-center gap-4">
+                    <div class="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center border border-white/10"><i data-lucide="brain" class="w-8 h-8"></i></div>
+                    <span class="font-mono text-xs text-slate-400">SIGNAL</span>
+                </div>
+                <div class="h-px w-16 bg-slate-600"></div>
+                <div class="flex flex-col items-center gap-4">
+                    <div class="w-20 h-20 bg-indigo-500/20 rounded-full flex items-center justify-center border border-indigo-500/50 shadow-[0_0_30px_rgba(99,102,241,0.3)]"><i data-lucide="cpu" class="w-8 h-8 text-indigo-400"></i></div>
+                    <span class="font-mono text-xs text-indigo-400">DECODE</span>
+                </div>
+                <div class="h-px w-16 bg-slate-600"></div>
+                <div class="flex flex-col items-center gap-4">
+                    <div class="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center border border-white/10"><i data-lucide="mouse-pointer-2" class="w-8 h-8"></i></div>
+                    <span class="font-mono text-xs text-slate-400">ACTION</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 7: NEURALINK (VISUAL) -->
+    <section id="slide-7">
+        <div class="container max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+            <div class="reveal-up">
+                <div class="pill-badge text-purple-300 border-purple-500/30 mb-6">Case Study 01</div>
+                <h2 class="text-5xl font-serif font-bold mb-6">The N1 Implant</h2>
+                <p class="text-slate-300 text-lg mb-6 leading-relaxed">
+                    1,024 electrodes. Wireless. Invisible.
+                    Noland Arbaugh used this to play <i>Civilization VI</i> for 8 hours with his mind.
+                </p>
+                <div class="glass-panel p-6 border-l-4 border-l-purple-500 tilt-card">
+                    <p class="italic text-purple-200 mb-2">"It was like using The Force."</p>
+                </div>
+            </div>
+            <div class="flex justify-center reveal-scale">
+                <div class="glass-panel p-2 w-80 h-80 tilt-card">
+                    <div class="image-container">
+                        <img src="https://images.unsplash.com/photo-1555255707-c07966088b7b?auto=format&fit=crop&w=800&q=80" alt="Tech Chip Placeholder">
+                        <div class="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-black/80 to-transparent text-xs text-white">
+                            THE LINK // 1024 CHANNELS
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 8: THE RECOVERY (CHART) -->
+    <section id="slide-8">
+        <div class="container max-w-5xl mx-auto">
+            <div class="text-center mb-10 reveal-up">
+                <h2 class="text-4xl font-bold mb-4">Software > Hardware</h2>
+                <p class="text-indigo-300">"85% of threads retracted. AI tuning saved the mission."</p>
+            </div>
+            <div class="glass-panel p-8 reveal-scale">
+                <div class="chart-container">
+                    <canvas id="recoveryChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 9: SAFETY -->
+    <section id="slide-9">
+        <div class="container max-w-5xl mx-auto">
+            <div class="text-center mb-12 reveal-up">
+                <h2 class="text-4xl font-bold text-rose-400 flex items-center justify-center gap-4">
+                    <i data-lucide="shield-alert" class="w-8 h-8"></i> Reality Check
+                </h2>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="glass-panel p-8 hover:-translate-y-2 transition-transform reveal-up tilt-card">
+                    <h3 class="font-bold text-xl mb-2 text-white">Infection</h3>
+                    <p class="text-sm text-slate-400">Drilling the skull breaches the blood-brain barrier.</p>
+                </div>
+                <div class="glass-panel p-8 hover:-translate-y-2 transition-transform reveal-up delay-100 tilt-card">
+                    <h3 class="font-bold text-xl mb-2 text-white">Gliosis</h3>
+                    <p class="text-sm text-slate-400">Scar tissue forms around electrodes, muting the signal.</p>
+                </div>
+                <div class="glass-panel p-8 hover:-translate-y-2 transition-transform reveal-up delay-200 tilt-card">
+                    <h3 class="font-bold text-xl mb-2 text-white">Heat</h3>
+                    <p class="text-sm text-slate-400">+1°C temp rise can damage neurons permanently.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 10: SYNCHRON (VISUAL) -->
+    <section id="slide-10">
+        <div class="container max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+            <div class="reveal-up order-2 md:order-1">
+                <div class="glass-panel p-2 w-full h-64 tilt-card">
+                    <div class="image-container">
+                        <img src="https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=800&q=80" alt="Vascular Medical">
+                    </div>
+                </div>
+            </div>
+            <div class="reveal-up order-1 md:order-2">
+                <div class="pill-badge text-cyan-300 border-cyan-500/30 mb-4">Case Study 02</div>
+                <h2 class="text-4xl font-serif font-bold mb-6">Synchron: The Blood Highway</h2>
+                <p class="text-slate-300 mb-6">
+                    No drilling. They push a "Stentrode" up the jugular vein until it parks next to the motor cortex.
+                </p>
+                <div class="p-4 bg-white/5 rounded-xl border border-slate-600 shadow-sm">
+                    <span class="text-green-400 font-bold">Verdict:</span> Safer, no open surgery, but lower bandwidth.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 11: PROSTHETICS -->
+    <section id="slide-11">
+        <div class="container max-w-4xl mx-auto text-center">
+            <h2 class="text-5xl font-serif font-bold mb-8 reveal-up">Humanity Revived</h2>
+            <div class="p-10 bg-white/5 border border-white/10 rounded-3xl text-white reveal-up">
+                <p class="text-2xl font-serif italic mb-6 text-indigo-200">"People drinking water on their own again. Holding a loved one's hand again."</p>
+                <div class="font-mono text-sm text-slate-500">NEUROPROSTHETICS</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 12: PERIPHERAL BCI -->
+    <section id="slide-12">
+        <div class="container max-w-5xl mx-auto text-center">
+            <div class="pill-badge mb-6 reveal-up">Consumer Future</div>
+            <h2 class="text-5xl font-bold mb-12 reveal-up">The <span class="text-cyan-400">Wrist</span> Interface</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 text-left items-center">
+                <div class="glass-panel p-2 h-64 tilt-card reveal-up">
+                    <div class="image-container">
+                        <img src="https://images.unsplash.com/photo-1510017803434-a899398421b3?auto=format&fit=crop&w=800&q=80" alt="Futuristic Wearable">
+                    </div>
+                </div>
+                <div class="glass-panel p-8 reveal-up delay-100 tilt-card">
+                    <h3 class="font-bold text-xl mb-2 text-white">Micro-Gestures</h3>
+                    <p class="text-slate-400 text-sm mb-4">Clicking without moving a finger. The ultimate stealth input for AR.</p>
+                    <div class="p-4 bg-white/5 rounded border border-white/10">
+                        <div class="text-xs font-mono text-cyan-400">STATUS: DETECTING EMG...</div>
+                        <div class="h-1 bg-slate-700 mt-2 rounded overflow-hidden">
+                            <div class="h-full bg-cyan-400 w-[10%] animate-pulse"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 13: TRADE-OFFS (RADAR CHART) -->
+    <section id="slide-13">
+        <div class="container max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+            <div class="reveal-up">
+                <h2 class="text-4xl font-bold mb-6">The Trade-off</h2>
+                <p class="text-slate-400 mb-4">Every architecture is a compromise.</p>
+                <ul class="space-y-4 text-sm text-slate-300">
+                    <li class="flex gap-2"><span class="text-indigo-400">●</span> Invasive (High Bandwidth, High Risk)</li>
+                    <li class="flex gap-2"><span class="text-cyan-400">●</span> Wearable (High Safety, Low Bandwidth)</li>
+                </ul>
+            </div>
+            <div class="glass-panel p-6 reveal-scale">
+                <div class="chart-container">
+                    <canvas id="radarChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 14: PERSONAL WHY -->
+    <section id="slide-14">
+        <div class="container max-w-4xl mx-auto text-center">
+            <div class="w-20 h-20 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-6 text-amber-400 border border-amber-500/50 reveal-up">
+                <i data-lucide="heart" class="w-10 h-10"></i>
+            </div>
+            <h2 class="text-5xl font-serif font-bold mb-8 text-white reveal-up">Why I Chose BCI</h2>
+            <p class="text-xl text-slate-300 leading-relaxed italic mb-8 reveal-up">
+                "Most technology improves convenience. BCI improves <span class="text-amber-400 font-bold">Human Capability</span>."
+            </p>
+        </div>
+    </section>
+
+    <!-- SLIDE 15: ETHICS -->
+    <section id="slide-15">
+        <div class="container max-w-6xl mx-auto">
+            <h2 class="text-5xl font-serif font-bold text-center mb-16 text-rose-400 reveal-up">Neurorights</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="glass-panel p-8 border-t-4 border-rose-500 reveal-up tilt-card">
+                    <i data-lucide="lock" class="mb-4 text-rose-400"></i>
+                    <h3 class="text-xl font-bold mb-2">Privacy</h3>
+                    <p class="text-slate-400 text-sm">Neural data reveals subconscious bias. Who owns this?</p>
+                </div>
+                <div class="glass-panel p-8 border-t-4 border-indigo-500 reveal-up delay-100 tilt-card">
+                    <i data-lucide="scale" class="mb-4 text-indigo-400"></i>
+                    <h3 class="text-xl font-bold mb-2">Agency</h3>
+                    <p class="text-slate-400 text-sm">If AI corrects your thought, who performed the action?</p>
+                </div>
+                <div class="glass-panel p-8 border-t-4 border-amber-500 reveal-up delay-200 tilt-card">
+                    <i data-lucide="users" class="mb-4 text-amber-400"></i>
+                    <h3 class="text-xl font-bold mb-2">Identity</h3>
+                    <p class="text-slate-400 text-sm">Will augmentation create a biological caste system?</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 16: SEMANTIC DECODING (TYPEWRITER) -->
+    <section id="slide-16">
+        <div class="container max-w-4xl mx-auto text-center">
+            <div class="font-mono text-xs text-indigo-400 mb-4 reveal-up">SOFTWARE_LAYER</div>
+            <h2 class="text-4xl font-bold mb-8 reveal-up">Inner Speech</h2>
+            <div class="bg-black/50 border border-white/10 p-12 rounded-2xl font-mono text-left reveal-up relative overflow-hidden shadow-inner">
+                <div class="text-slate-600 text-xs mb-4">PREDICTION_STREAM:</div>
+                <div class="text-2xl md:text-4xl text-white leading-tight" id="typewriter">
+                    "Hello world.<br>This is my inner voice."
+                </div>
+                <div class="w-4 h-8 bg-cyan-400 animate-pulse inline-block align-middle ml-1"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 17: MARKET GROWTH (CHART) -->
+    <section id="slide-17">
+        <div class="container max-w-5xl mx-auto">
+            <div class="text-center mb-10 reveal-up">
+                <h2 class="text-4xl font-bold mb-4">The Boom</h2>
+                <p class="text-green-400">Projected Market Growth (CAGR 17%)</p>
+            </div>
+            <div class="glass-panel p-8 reveal-scale">
+                <div class="chart-container">
+                    <canvas id="marketChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 18: DISCUSSION (POLL) -->
+    <section id="slide-18">
+        <div class="container max-w-4xl mx-auto">
+            <div class="text-center mb-12 reveal-up">
+                <div class="inline-block p-4 rounded-full bg-white/10 mb-4"><i data-lucide="message-circle" class="w-8 h-8"></i></div>
+                <h2 class="text-4xl font-bold">Let's Discuss</h2>
+            </div>
+            <div class="space-y-4">
+                <div class="glass-panel p-6 cursor-pointer hover:bg-white/10 transition-colors group reveal-up" onclick="vote(this, '65%')">
+                    <div class="flex justify-between font-bold text-lg mb-2">
+                        <span>Would you install a BCI to compete with AI?</span>
+                        <span class="opacity-0 group-hover:opacity-100 transition-opacity text-cyan-400 result">65% YES</span>
+                    </div>
+                    <div class="h-1 bg-slate-700 rounded-full"><div class="h-full bg-cyan-400 w-0 bar transition-all duration-1000"></div></div>
+                </div>
+                
+                <div class="glass-panel p-6 cursor-pointer hover:bg-white/10 transition-colors group reveal-up delay-100" onclick="vote(this, '80%')">
+                    <div class="flex justify-between font-bold text-lg mb-2">
+                        <span>Should it be for medical use only?</span>
+                        <span class="opacity-0 group-hover:opacity-100 transition-opacity text-indigo-400 result">80% NO</span>
+                    </div>
+                    <div class="h-1 bg-slate-700 rounded-full"><div class="h-full bg-indigo-400 w-0 bar transition-all duration-1000"></div></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 19: FUTURE -->
+    <section id="slide-19">
+        <div class="container max-w-5xl mx-auto text-center">
+            <h2 class="text-5xl md:text-7xl font-serif font-bold mb-12 reveal-up text-white">The Horizon</h2>
+            <div class="grid grid-cols-3 gap-4 text-sm md:text-base font-mono text-indigo-300 reveal-up">
+                <div class="p-4 border border-indigo-500/30 rounded-lg">NEAR TERM:<br>Assistive Tech</div>
+                <div class="p-4 border border-indigo-500/30 rounded-lg">MID TERM:<br>Hybrid Context</div>
+                <div class="p-4 border border-indigo-500/30 rounded-lg">LONG TERM:<br>Symbiosis</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 20: OUTRO -->
+    <section id="slide-20">
+        <div class="container max-w-4xl mx-auto text-center">
+            <h1 class="text-6xl font-serif font-bold mb-8 reveal-up text-white">Thank You.</h1>
+            <div class="glass-panel inline-block px-8 py-4 reveal-up">
+                <div class="font-bold text-xl">Rohit Kumar</div>
+                <div class="text-sm text-slate-400">Core Team | RaSoR IIT Madras</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SLIDE 21: BIBLIOGRAPHY -->
+<section id="slide-21">
+  <div class="container max-w-5xl mx-auto text-center">
+
+    <h2 class="text-5xl md:text-7xl font-serif font-bold mb-4 reveal-up text-white">
+      Bibliography
+    </h2>
+
+    <p class="text-sm md:text-base text-indigo-300/70 mb-12 reveal-up">
+      Intellectual Foundations of This Research
+    </p>
+
+    <div class="grid grid-cols-3 gap-4 text-sm md:text-base font-mono text-indigo-300 reveal-up">
+
+      <div class="p-4 border border-indigo-500/30 rounded-lg">
+        NEURAL FOUNDATIONS<br>
+        Cortical Signal Processing<br>
+        Motor & Speech Cortex Research<br>
+        Invasive and Peripheral BCI Systems<br>
+        Neurophysiology of Intent
+      </div>
+
+      <div class="p-4 border border-indigo-500/30 rounded-lg">
+        COMPUTATION & INTERPRETATION<br>
+        Machine Learning for Neural Decoding<br>
+        Semantic & Inner Speech Models<br>
+        Closed-Loop Adaptive Systems<br>
+        Human–AI Collaboration
+      </div>
+
+      <div class="p-4 border border-indigo-500/30 rounded-lg">
+        THEORY, ETHICS & HCI<br>
+        Human–Computer Interaction Theory<br>
+        Neurorights & Mental Privacy<br>
+        Cognitive Autonomy<br>
+        Human–Machine Symbiosis
+      </div>
+
+    </div>
+
+    <p class="mt-10 text-xs md:text-sm italic text-indigo-300/50 reveal-up">
+      This research draws from interdisciplinary knowledge to view the brain not just as data,
+      but as a meaningful interface between human intent and machines.
+    </p>
+
+  </div>
+</section>
+
+
+
+    <script>
+        // --- CHART MANAGER (PREVENTS CRASHES) ---
+        const chartManager = {
+            charts: {},
+            create: function(id, config) {
+                const ctx = document.getElementById(id);
+                if (!ctx) return;
+                
+                // Destroy existing
+                if (this.charts[id]) {
+                    this.charts[id].destroy();
+                }
+                
+                // Create new
+                this.charts[id] = new Chart(ctx, config);
+            }
+        };
+
+        // --- INIT ---
+        document.addEventListener("DOMContentLoaded", function() {
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+            
+            gsap.registerPlugin(ScrollTrigger, TextPlugin);
+            initNav();
+            initAnimations();
+            initNeuralBg();
+            initEEG();
+        });
+
+        // --- BACKGROUND FX ---
+        function initNeuralBg() {
+            const canvas = document.getElementById('neural-canvas');
+            const ctx = canvas.getContext('2d');
+            let width, height, particles = [];
+
+            function resize() {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            class Particle {
+                constructor() {
+                    this.x = Math.random() * width; this.y = Math.random() * height;
+                    this.vx = (Math.random() - 0.5) * 0.5; this.vy = (Math.random() - 0.5) * 0.5;
+                    this.size = Math.random() * 2;
+                }
+                update() {
+                    this.x += this.vx; this.y += this.vy;
+                    if(this.x < 0 || this.x > width) this.vx *= -1;
+                    if(this.y < 0 || this.y > height) this.vy *= -1;
+                }
+                draw() {
+                    ctx.fillStyle = 'rgba(129, 140, 248, 0.5)';
+                    ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
+                }
+            }
+
+            for(let i=0; i<60; i++) particles.push(new Particle());
+
+            let mouse = { x: null, y: null };
+            window.addEventListener('mousemove', e => {
+                mouse.x = e.clientX; mouse.y = e.clientY;
+            });
+
+            function animate() {
+                ctx.clearRect(0,0,width,height);
+                particles.forEach(p => {
+                    p.update(); p.draw();
+                    const dx = p.x - mouse.x; const dy = p.y - mouse.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if(dist < 150) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = `rgba(34, 211, 238, ${1 - dist/150})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.moveTo(p.x, p.y); ctx.lineTo(mouse.x, mouse.y);
+                        ctx.stroke();
+                    }
+                });
+                requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        function initEEG() {
+            const canvas = document.getElementById('eeg-canvas');
+            const ctx = canvas.getContext('2d');
+            let width, height;
+            let time = 0;
+            let stress = 0;
+
+            function resize() {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = 80;
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            let lastX = 0, lastY = 0;
+            window.addEventListener('mousemove', e => {
+                const dist = Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY);
+                stress = Math.min(stress + dist * 0.05, 50);
+                lastX = e.clientX; lastY = e.clientY;
+            });
+
+            function draw() {
+                ctx.clearRect(0, 0, width, height);
+                ctx.beginPath();
+                ctx.strokeStyle = '#22d3ee';
+                ctx.lineWidth = 2;
+
+                for (let x = 0; x < width; x++) {
+                    const amplitude = 10 + (stress * 0.5); 
+                    const y = height/2 + Math.sin((x * 0.05) + time) * amplitude * Math.sin((x * 0.01) + time * 0.5);
+                    if (x === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                time += 0.2;
+                stress *= 0.95;
+                requestAnimationFrame(draw);
+            }
+            draw();
+        }
+
+        // --- NAV ---
+        function initNav() {
+            const container = document.getElementById('navDots');
+            for(let i=1; i<=20; i++) {
+                const dot = document.createElement('div');
+                dot.className = 'dot';
+                dot.onclick = () => document.getElementById(`slide-${i}`).scrollIntoView();
+                container.appendChild(dot);
+            }
+            window.addEventListener('scroll', () => {
+                const sections = document.querySelectorAll('section');
+                let current = '';
+                const scrollY = window.scrollY;
+                sections.forEach((sec, idx) => {
+                    if(scrollY >= sec.offsetTop - window.innerHeight/2) current = idx;
+                });
+                const dots = document.querySelectorAll('.dot');
+                dots.forEach(d => d.classList.remove('active'));
+                if(dots[current]) dots[current].classList.add('active');
+            });
+        }
+
+        // --- ANIMATIONS & CHARTS ---
+        function initAnimations() {
+            // General Reveals
+            document.querySelectorAll('.reveal-up, .reveal-scale').forEach(el => {
+                gsap.fromTo(el, 
+                    { y: 50, opacity: 0, scale: 0.95 },
+                    { y: 0, opacity: 1, scale: 1, duration: 0.8, ease: "power3.out", scrollTrigger: { trigger: el, start: "top 85%" } }
+                );
+            });
+
+            // Slide 5: Count Up
+            ScrollTrigger.create({
+                trigger: "#slide-5", start: "top 60%",
+                onEnter: () => {
+                    document.querySelectorAll('.count-up').forEach(el => {
+                        const target = parseInt(el.dataset.target);
+                        gsap.to(el, { innerHTML: target, duration: 2, snap: { innerHTML: 1 } });
+                    });
+                    document.querySelectorAll('.bar-anim').forEach(el => { el.style.width = el.dataset.width; });
+                }
+            });
+
+            // Slide 8: Recovery Chart
+            ScrollTrigger.create({
+                trigger: "#slide-8", start: "top 70%",
+                onEnter: () => {
+                    chartManager.create('recoveryChart', {
+                        type: 'line',
+                        data: {
+                            labels: ['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4 (Fix)', 'Wk 5', 'Wk 6'],
+                            datasets: [{
+                                label: 'Cursor BPS', data: [9.0, 8.5, 4.0, 5.0, 8.8, 9.5],
+                                borderColor: '#818cf8', backgroundColor: 'rgba(129, 140, 248, 0.1)',
+                                borderWidth: 3, tension: 0.4, fill: true, pointBackgroundColor: '#fff'
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
+                    });
+                }
+            });
+
+            // Slide 13: Radar Chart
+            ScrollTrigger.create({
+                trigger: "#slide-13", start: "top 70%",
+                onEnter: () => {
+                    chartManager.create('radarChart', {
+                        type: 'radar',
+                        data: {
+                            labels: ['Bandwidth', 'Safety', 'Cost', 'Comfort', 'Adoption'],
+                            datasets: [{
+                                label: 'Invasive', data: [95, 30, 20, 40, 10],
+                                borderColor: '#818cf8', backgroundColor: 'rgba(129, 140, 248, 0.2)',
+                            }, {
+                                label: 'Wearable', data: [40, 90, 80, 90, 70],
+                                borderColor: '#22d3ee', backgroundColor: 'rgba(34, 211, 238, 0.2)',
+                            }]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            scales: { r: { grid: { color: 'rgba(255,255,255,0.1)' }, pointLabels: { color: '#94a3b8', font: { size: 12 } }, ticks: { display: false, backdropColor: 'transparent' } } },
+                            plugins: { legend: { labels: { color: 'white' } } }
+                        }
+                    });
+                }
+            });
+
+            // Slide 17: Market Chart
+            ScrollTrigger.create({
+                trigger: "#slide-17", start: "top 70%",
+                onEnter: () => {
+                    chartManager.create('marketChart', {
+                        type: 'bar',
+                        data: {
+                            labels: ['2023', '2024', '2025', '2026', '2027', '2030'],
+                            datasets: [{
+                                label: 'Market ($Bn)', data: [1.8, 2.3, 3.1, 4.5, 6.2, 14.0],
+                                backgroundColor: ['#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#22d3ee'],
+                                borderRadius: 8
+                            }]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } }
+                        }
+                    });
+                }
+            });
+
+            // Slide 16: Typewriter
+            gsap.to("#typewriter", {
+                text: { value: '"Hello world.<br>This is my inner voice."', delimiter: "" },
+                duration: 4, ease: "none",
+                scrollTrigger: { trigger: "#slide-16", start: "top 60%" }
+            });
+        }
+
+        // --- INTERACTIVITY ---
+        function runSim() {
+            const bar = document.getElementById('bottleneckBar');
+            bar.style.width = '0.1%';
+            setTimeout(() => { bar.style.width = '5%'; }, 100);
+        }
+
+        function vote(el, pct) {
+            const bar = el.querySelector('.bar');
+            const res = el.querySelector('.result');
+            if(bar.style.width === "" || bar.style.width === "0px") {
+                bar.style.width = pct;
+                res.style.opacity = 1;
+            }
+        }
+
+        // 3D Tilt
+        document.addEventListener('mousemove', (e) => {
+            const cards = document.querySelectorAll('.tilt-card');
+            cards.forEach(card => {
+                requestAnimationFrame(() => {
+                    const rect = card.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    if (x > 0 && x < rect.width && y > 0 && y < rect.height) {
+                        const centerX = rect.width / 2; const centerY = rect.height / 2;
+                        const rotateX = ((y - centerY) / centerY) * -10;
+                        const rotateY = ((x - centerX) / centerX) * 10;
+                        card.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.02)`;
+                    } else {
+                        card.style.transform = `rotateX(0) rotateY(0) scale(1)`;
+                    }
+                });
+            });
+        });
+
+    </script>
+</body>
+</html>
